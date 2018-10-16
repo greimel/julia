@@ -1,12 +1,14 @@
 # This file is a part of Julia. License is MIT: https://julialang.org/license
 
+@noinline __str_throw_boundserror(a, i) = throw(BoundsError(a, i))
+
 nothing_sentinel(i) = i == 0 ? nothing : i
 
 function findnext(pred::Fix2{<:Union{typeof(isequal),typeof(==)},<:AbstractChar},
                   s::String, i::Integer)
     if i < 1 || i > sizeof(s)
         i == sizeof(s) + 1 && return nothing
-        throw(BoundsError(s, i))
+        __str_throw_boundserror(s, i)
     end
     @inbounds isvalid(s, i) || string_index_err(s, i)
     c = pred.x
@@ -27,16 +29,18 @@ findnext(pred::Fix2{<:Union{typeof(isequal),typeof(==)},<:Union{Int8,UInt8}}, a:
 
 function _search(a::Union{String,ByteArray}, b::Union{Int8,UInt8}, i::Integer = 1)
     if i < 1
-        throw(BoundsError(a, i))
+         __str_throw_boundserror(a, i)
     end
     n = sizeof(a)
     if i > n
-        return i == n+1 ? 0 : throw(BoundsError(a, i))
+        return i == n+1 ? 0 :  __str_throw_boundserror(a, i)
     end
     p = pointer(a)
     q = ccall(:memchr, Ptr{UInt8}, (Ptr{UInt8}, Int32, Csize_t), p+i-1, b, n-i+1)
     q == C_NULL ? 0 : Int(q-p+1)
 end
+
+
 
 function _search(a::ByteArray, b::AbstractChar, i::Integer = 1)
     if isascii(b)
@@ -67,11 +71,11 @@ findprev(pred::Fix2{<:Union{typeof(isequal),typeof(==)},<:Union{Int8,UInt8}}, a:
 
 function _rsearch(a::Union{String,ByteArray}, b::Union{Int8,UInt8}, i::Integer = sizeof(a))
     if i < 1
-        return i == 0 ? 0 : throw(BoundsError(a, i))
+        return i == 0 ? 0 : __str_throw_boundserror(a, i)
     end
     n = sizeof(a)
     if i > n
-        return i == n+1 ? 0 : throw(BoundsError(a, i))
+        return i == n+1 ? 0 : __str_throw_boundserror(a, i)
     end
     p = pointer(a)
     q = ccall(:memrchr, Ptr{UInt8}, (Ptr{UInt8}, Int32, Csize_t), p, b, i)
@@ -107,7 +111,7 @@ findfirst(pattern::AbstractString, string::AbstractString) =
 # AbstractString implementation of the generic findnext interface
 function findnext(testf::Function, s::AbstractString, i::Integer)
     z = ncodeunits(s) + 1
-    1 ≤ i ≤ z || throw(BoundsError(s, i))
+    1 ≤ i ≤ z || __str_throw_boundserror(s, i)
     @inbounds i == z || isvalid(s, i) || string_index_err(s, i)
     for (j, d) in pairs(SubString(s, i))
         if testf(d)
@@ -124,7 +128,7 @@ function _searchindex(s::Union{AbstractString,ByteArray},
                       i::Integer)
     if isempty(t)
         return 1 <= i <= nextind(s,lastindex(s)) ? i :
-               throw(BoundsError(s, i))
+               __str_throw_boundserror(s, i)
     end
     t1, trest = Iterators.peel(t)
     while true
@@ -149,7 +153,7 @@ _nthbyte(a::Union{AbstractVector{UInt8},AbstractVector{Int8}}, i) = a[i]
 
 function _searchindex(s::String, t::String, i::Integer)
     # Check for fast case of a single byte
-    lastindex(t) == 1 && return something(findnext(isequal(t[1]), s, i), 0)
+    sizeof(t) == 1 && return something(findnext(isequal(first(t)), s, i), 0)
     _searchindex(unsafe_wrap(Vector{UInt8},s), unsafe_wrap(Vector{UInt8},t), i)
 end
 
@@ -253,7 +257,14 @@ julia> findnext("Lang", "JuliaLang", 2)
 6:9
 ```
 """
-findnext(t::AbstractString, s::AbstractString, i::Integer) = _search(s, t, i)
+function findnext(t::AbstractString, s::AbstractString, i::Integer)
+    if sizeof(t) == 1
+        v = findnext(isequal(first(t)), s, i)
+        return v === nothing ? nothing : v:v
+    else
+        return _search(s, t, i)
+    end
+end
 
 """
     findlast(pattern::AbstractString, string::AbstractString)
@@ -270,17 +281,24 @@ julia> findfirst("Julia", "JuliaLang")
 1:5
 ```
 """
-findlast(pattern::AbstractString, string::AbstractString) =
-    findprev(pattern, string, lastindex(string))
+function findlast(t::AbstractString, s::AbstractString)
+    l = lastindex(s)
+    if sizeof(t) == 1
+        v = findprev(isequal(first(t)), s, l)
+        return v === nothing ? nothing : v:v
+    else
+        return findprev(t, s, l)
+    end
+end
 
 # AbstractString implementation of the generic findprev interface
 function findprev(testf::Function, s::AbstractString, i::Integer)
     if i < 1
-        return i == 0 ? nothing : throw(BoundsError(s, i))
+        return i == 0 ? nothing : __str_throw_boundserror(s, i)
     end
     n = ncodeunits(s)
     if i > n
-        return i == n+1 ? nothing : throw(BoundsError(s, i))
+        return i == n+1 ? nothing : __str_throw_boundserror(s, i)
     end
     # r[reverseind(r,i)] == reverse(r)[i] == s[i]
     # s[reverseind(s,j)] == reverse(s)[j] == r[j]
@@ -294,7 +312,7 @@ function _rsearchindex(s::AbstractString,
                        i::Integer)
     if isempty(t)
         return 1 <= i <= nextind(s, lastindex(s)) ? i :
-               throw(BoundsError(s, i))
+               __str_throw_boundserror(s, i)
     end
     t1, trest = Iterators.peel(Iterators.reverse(t))
     while true
